@@ -37,14 +37,14 @@ _start:
 	mov rbp, rsp				; mark bottom of stack
 	sub rsp, 2304				; 1kb input buffer + 1280b output buffer
 read_loop:
-	xor rax, rax				; read
-	xor rdi, rdi				; fd = stdin
-	mov rdx, 1024				; input buffer is 1kb  FIXME: this instruction is 9 bytes
+	xor eax, eax				; read
+	xor edi, edi				; fd = stdin
+	mov edx, 1024				; input buffer is 1kb  FIXME: this instruction is 7 bytes
 	mov rsi, rbp				; input buffer is at rbp - len
 	sub rsi, rdx
 	syscall
 
-	cmp rax, 0				; rax is bytes read  FIXME: this instruction is 8 bytes
+	cmp eax, 0				; rax is bytes read.  return code won't fill rax, so use eax
 	jle exit				; zero bytes read is eof.  negative bytes is error
 
 rle_asm:
@@ -57,8 +57,8 @@ rle_asm:
 	mov rdx, rsp				; output buffer should be in rsp
 
 rle_asm_outer_loop:
-	mov al, 251				; run end = data end, capped to 251 (255 - 4)
-	movzx rbx, al
+	mov ax, 255				; run end = data end, capped to 255
+	mov ebx, eax
 	add rbx, rdi
 	cmp rbx, rsi
 	cmovg rbx, rsi
@@ -82,7 +82,7 @@ rle_asm_run_loop_end:
 	sub rbx, r9
 
 	; expand run
-	mov rcx, 4
+	mov ecx, 4
 	cmp bl, cl
 	cmovb ecx, ebx
 	jb expand_loop
@@ -108,16 +108,16 @@ expand_loop:
 rle_asm_end:
 	; length is already in rdx
 	mov al, 1				; write.  rax must be < 256 before this
-	mov rdi, rax				; fd = stdout
+	mov edi, eax				; fd = stdout
 	mov rsi, rsp				; buffer is at rbp - 2304 (where stack should be)
 	syscall
 
 	; check for write success
-	cmp rax, rdx
+	cmp eax, edx				; if rax is negative, it must be > 1280 (max output length)
 	je read_loop
 
 exit:
-	mov rdi, rax				; put error code in rdi
+	xchg rdi, rax				; put error code in rdi
 	neg rdi
 	mov rax, 60				; exit
 	syscall
