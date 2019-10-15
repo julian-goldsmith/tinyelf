@@ -34,8 +34,8 @@ align 4
 _start:
 	; input buffer is 1024 long at rbp - 1024
 	; output buffer is 5 long (worst-case output length) at rbp - 1029
-	sub rsp, 1029				; 1kb input buffer + 5b output buffer
-	lea rbp, [rsp + 5]			; output buffer
+	sub rsp, 1029				; 5b output buffer + 1kb input buffer
+	lea rbp, [rsp + 5]			; input buffer
 read_loop:
 	xor eax, eax				; read
 	xor edi, edi				; fd = stdin
@@ -47,37 +47,37 @@ read_loop:
 	jle exit				; zero bytes read is eof.  negative bytes is error
 
 rle_asm:
-	; rdi is data pos
-	; rsi is data end
+	; rsi is data pos
+	; r10 is data end
 	; rsp is output start
 	; output length returned in rdx
-	mov rdi, rsi				; input buffer is in rsi from read call
-	add rsi, rax				; r10 is now end pointer
-	xchg r10, rsi
+	mov rsi, rbp				; input buffer is in rbp
+	mov r10, rbp				; r10 is now end pointer
+	add r10, rax
 
 rle_asm_outer_loop:
 	mov ax, 255				; run end = data end, capped to 255
 	mov edx, eax
-	add rdx, rdi
+	add rdx, rsi
 	cmp rdx, r10
 	cmovg rdx, r10
 
-	mov r9, rdi				; r9 = run start
-	mov al, byte [rdi]			; al is current byte
+	mov r9, rsi				; r9 = run start
+	mov al, byte [rsi]			; al is current byte
 
 	; count bytes in run
 rle_asm_run_loop_start:
-	inc rdi
+	inc rsi
 
-	cmp rdi, rdx				; test for end of run
+	cmp rsi, rdx				; test for end of run
 	jae rle_asm_run_loop_end
 
-	cmp al, [rdi]				; test byte
+	cmp al, [rsi]				; test byte
 	je rle_asm_run_loop_start
 rle_asm_run_loop_end:
 
 	; count = data pos - run start
-	mov rdx, rdi
+	mov rdx, rsi
 	sub rdx, r9
 
 	; expand run
@@ -97,7 +97,7 @@ expand_loop:
 	loop expand_loop
 
 rle_asm_end:
-	xchg rdi, r9				; stash position pointer
+	xchg rsi, r9				; stash position pointer
 
 	; length is already in rdx
 	mov al, 1				; write.  rax must be < 256 before this
@@ -105,8 +105,8 @@ rle_asm_end:
 	mov rsi, rsp				; buffer is at rsp
 	syscall
 
-	xchg rdi, r9
-	cmp rdi, r10				; loop if we have data left to process
+	xchg rsi, r9
+	cmp rsi, r10				; loop if we have data left to process
 	jb rle_asm_outer_loop
 
 	jmp read_loop
