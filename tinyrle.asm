@@ -34,14 +34,13 @@ align 4
 _start:
 	; input buffer is 1024 long at rbp - 1024
 	; output buffer is 5 long (worst-case output length) at rbp - 1029
-	mov rbp, rsp				; mark bottom of stack
 	sub rsp, 1029				; 1kb input buffer + 5b output buffer
+	lea rbp, [rsp + 5]			; output buffer
 read_loop:
 	xor eax, eax				; read
 	xor edi, edi				; fd = stdin
-	mov edx, 1024				; input buffer is 1kb  FIXME: this instruction is 7 bytes
+	mov edx, 1024				; input buffer is 1kb
 	mov rsi, rbp				; input buffer is at rbp - len
-	sub rsi, rdx
 	syscall
 
 	cmp eax, 0				; rax is bytes read.  return code won't fill rax, so use eax
@@ -50,14 +49,13 @@ read_loop:
 rle_asm:
 	; rdi is data pos
 	; rsi is data end
-	; rbx is output
+	; rsp is output start
 	; output length returned in rdx
 	mov rdi, rsi				; input buffer is in rsi from read call
 	add rsi, rax				; r10 is now end pointer
 	xchg r10, rsi
 
 rle_asm_outer_loop:
-	mov rbx, rsp				; output buffer should be in rsp
 	mov ax, 255				; run end = data end, capped to 255
 	mov edx, eax
 	add rdx, rdi
@@ -83,19 +81,19 @@ rle_asm_run_loop_end:
 	sub rdx, r9
 
 	; expand run
-	mov ecx, 4
+	xor ecx, ecx
+	mov cl, 4
 	cmp dl, cl
 	cmovb ecx, edx
 	jb expand_loop
 
 	; append the rest of the count
 	sub dl, cl
-	mov byte [rbx + 4], dl
-	mov dl, cl				; rdx is number of bytes to advance output
-	inc dl
+	mov byte [rsp + 4], dl
+	mov dl, 5				; dl is output length
 
 expand_loop:
-	mov byte [rbx + rcx - 1], al
+	mov byte [rsp + rcx - 1], al
 	loop expand_loop
 
 rle_asm_end:
