@@ -93,8 +93,8 @@ rle_asm_run_loop_end:
 	mov dl, 5				; dl is output length
 
 expand_loop:
-	mov byte [rsp + rcx - 1], al
-	loop expand_loop
+	mov rdi, rsp
+	rep stosb
 
 rle_asm_end:
 	xchg rsi, r9				; stash position pointer
