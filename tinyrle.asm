@@ -33,9 +33,9 @@ phdrsize	equ     $ - phdr
 align 4
 _start:
 	; input buffer is 1024 long at rbp - 1024
-	; output buffer is 1280 long (worst-case output length) at rbp - 2304
+	; output buffer is 5 long (worst-case output length) at rbp - 1029
 	mov rbp, rsp				; mark bottom of stack
-	sub rsp, 2304				; 1kb input buffer + 1280b output buffer
+	sub rsp, 1029				; 1kb input buffer + 5b output buffer
 read_loop:
 	xor eax, eax				; read
 	xor edi, edi				; fd = stdin
@@ -50,18 +50,19 @@ read_loop:
 rle_asm:
 	; rdi is data pos
 	; rsi is data end
-	; rdx is output
+	; rbx is output
 	; output length returned in rdx
 	mov rdi, rsi				; input buffer is in rsi from read call
-	add rsi, rax				; rsi is now end pointer
-	mov rdx, rsp				; output buffer should be in rsp
+	add rsi, rax				; r10 is now end pointer
+	xchg r10, rsi
 
 rle_asm_outer_loop:
+	mov rbx, rsp				; output buffer should be in rsp
 	mov ax, 255				; run end = data end, capped to 255
-	mov ebx, eax
-	add rbx, rdi
-	cmp rbx, rsi
-	cmovg rbx, rsi
+	mov edx, eax
+	add rdx, rdi
+	cmp rdx, r10
+	cmovg rdx, r10
 
 	mov r9, rdi				; r9 = run start
 	mov al, byte [rdi]			; al is current byte
@@ -70,7 +71,7 @@ rle_asm_outer_loop:
 rle_asm_run_loop_start:
 	inc rdi
 
-	cmp rdi, rbx				; test for end of run
+	cmp rdi, rdx				; test for end of run
 	jae rle_asm_run_loop_end
 
 	cmp al, [rdi]				; test byte
@@ -78,43 +79,39 @@ rle_asm_run_loop_start:
 rle_asm_run_loop_end:
 
 	; count = data pos - run start
-	mov rbx, rdi
-	sub rbx, r9
+	mov rdx, rdi
+	sub rdx, r9
 
 	; expand run
 	mov ecx, 4
-	cmp bl, cl
-	cmovb ecx, ebx
+	cmp dl, cl
+	cmovb ecx, edx
 	jb expand_loop
 
 	; append the rest of the count
-	sub bl, cl
-	mov byte [rdx + 4], bl
-	mov bl, cl				; rbx is number of bytes to advance output
-	inc bl
+	sub dl, cl
+	mov byte [rbx + 4], dl
+	mov dl, cl				; rdx is number of bytes to advance output
+	inc dl
 
 expand_loop:
-	mov byte [rdx + rcx - 1], al
+	mov byte [rbx + rcx - 1], al
 	loop expand_loop
 
-	add rdx, rbx				; advance output pointer
-
-	cmp rdi, rsi				; loop if we have data left to process
-	jb rle_asm_outer_loop
-
-	; return output pos - output original
-	sub rdx, rsp
-
 rle_asm_end:
+	xchg rdi, r9				; stash position pointer
+
 	; length is already in rdx
 	mov al, 1				; write.  rax must be < 256 before this
 	mov edi, eax				; fd = stdout
-	mov rsi, rsp				; buffer is at rbp - 2304 (where stack should be)
+	mov rsi, rsp				; buffer is at rsp
 	syscall
 
-	; check for write success
-	cmp eax, edx				; if rax is negative, it must be > 1280 (max output length)
-	je read_loop
+	xchg rdi, r9
+	cmp rdi, r10				; loop if we have data left to process
+	jb rle_asm_outer_loop
+
+	jmp read_loop
 
 exit:
 	xchg rdi, rax				; put error code in rdi
