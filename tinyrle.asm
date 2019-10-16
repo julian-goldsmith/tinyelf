@@ -1,5 +1,7 @@
 BITS 64
 
+org     0x400000
+
 ehdr:                                           ; Elf64_Ehdr
 	db      0x7F, "ELF", 2, 1, 1, 0         ;   e_ident
 	times	8 db 0
@@ -29,59 +31,54 @@ phdr:                                           ; Elf64_Phdr
 	dq      0x0004                          ;   p_align		Elf64_Xword
 phdrsize	equ     $ - phdr
 
-	org     0x400000
 align 4
 _start:
-	; input buffer is 1024 long at rbp - 1024
-	; output buffer is 5 long (worst-case output length) at rbp - 1029
+	; input buffer is 1024 long at (initial) rsp - 1024
+	; output buffer is 5 long (worst-case output length) at (initial) rsp - 1029
 	sub rsp, 1029				; 5b output buffer + 1kb input buffer
 	lea rbp, [rsp + 5]			; input buffer
 read_loop:
 	xor eax, eax				; read
 	xor edi, edi				; fd = stdin
 	mov edx, 1024				; input buffer is 1kb
-	mov rsi, rbp				; input buffer is at rbp - len
+	mov rsi, rbp				; input buffer is at rbp
 	syscall
 
 	cmp eax, 0				; rax is bytes read.  return code won't fill rax, so use eax
 	jle exit				; zero bytes read is eof.  negative bytes is error
 
 rle_asm:
-	; rsi is data pos
-	; r10 is data end
+	; rbp is data base
+	; rbx is data pos
+	; r10 is data length
 	; rsp is output start
 	; output length returned in rdx
-	mov rsi, rbp				; input buffer is in rbp
-	mov r10, rbp				; r10 is now end pointer
-	add r10, rax
+	xor rbx, rbx				; init data position
+	mov r10, rax				; r10 is now end pointer
 
 rle_asm_outer_loop:
-	mov ax, 255				; run end = data end, capped to 255
-	mov edx, eax
-	add rdx, rsi
-	cmp rdx, r10
-	cmovg rdx, r10
+	xor ecx, ecx
+	mov ecx, 255				; cap max run length to 255
+	cmp ecx, r10d
+	cmovg ecx, r10d
 
-	mov r9, rsi				; r9 = run start
-	mov al, byte [rsi]			; al is current byte
+	mov r8d, ebx				; store run start position
+
+	lea rdi, [rbp + rbx]
+	mov al, byte [rdi]			; al is current byte
 
 	; count bytes in run
-rle_asm_run_loop_start:
-	inc rsi
+	repe scasb
 
-	cmp rsi, rdx				; test for end of run
-	jae rle_asm_run_loop_end
-
-	cmp al, [rsi]				; test byte
-	je rle_asm_run_loop_start
-rle_asm_run_loop_end:
-
-	; count = data pos - run start
-	mov rdx, rsi
-	sub rdx, r9
+	; count
+	mov rbx, rdi				; rbx should be position in output
+	sub rbx, rbp
+	dec rbx
 
 	; expand run
 	xor ecx, ecx
+	mov edx, ebx				; use rdx, since we want it to be length later
+	sub edx, r8d				; take out previous bytes in run
 	mov cl, 4
 	cmp dl, cl
 	cmovb ecx, edx
@@ -97,16 +94,13 @@ expand_loop:
 	rep stosb
 
 rle_asm_end:
-	xchg rsi, r9				; stash position pointer
-
 	; length is already in rdx
 	mov al, 1				; write.  rax must be < 256 before this
 	mov edi, eax				; fd = stdout
 	mov rsi, rsp				; buffer is at rsp
 	syscall
 
-	xchg rsi, r9
-	cmp rsi, r10				; loop if we have data left to process
+	cmp rbx, r10				; loop if we have data left to process
 	jb rle_asm_outer_loop
 
 	jmp read_loop
