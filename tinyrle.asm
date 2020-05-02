@@ -37,6 +37,8 @@ _start:
 	; output buffer is 5 long (worst-case output length) at (initial) rsp - 1029
 	sub rsp, 1029				; 5b output buffer + 1kb input buffer
 	lea rbp, [rsp + 5]			; input buffer
+	cld					; make sure flag is set to increment
+
 read_loop:
 	xor eax, eax				; read
 	xor edi, edi				; fd = stdin
@@ -51,41 +53,42 @@ rle_asm:
 	; rbp is data base
 	; rbx is data pos
 	; r10 is data length
+	; rdi is temp data pointer / temp output pointer
+	; ecx is run max counter / byte expand counter
 	; rsp is output start
 	; output length returned in rdx
-	xor rbx, rbx				; init data position
-	mov r10, rax				; r10 is now end pointer
+	xor ebx, ebx				; init data position
+	mov r10, rax				; r10 is now length
 
 rle_asm_outer_loop:
-	xor ecx, ecx
 	mov ecx, 255				; cap max run length to 255
-	cmp ecx, r10d
+	add ecx, ebx
+	cmp ecx, r10d				; cap run length to data end if necessary
 	cmovg ecx, r10d
-
-	mov r8d, ebx				; store run start position
+	sub ecx, ebx
 
 	lea rdi, [rbp + rbx]
-	mov al, byte [rdi]			; al is current byte
+	movzx eax, byte [rdi]			; al is current byte
+	mov r8, rdi
 
 	; count bytes in run
-	repe scasb
+	repe scasb				; search string for byte not in al
 
 	; count
-	mov rbx, rdi				; rbx should be position in output
-	sub rbx, rbp
-	dec rbx
+	;sub rdi, rbp				; trash rdi, because we reset it later
+	sub rdi, r8
+	xchg ebx, edi				; rbx should be position in output
+	;dec ebx
 
 	; expand run
-	xor ecx, ecx
 	mov edx, ebx				; use rdx, since we want it to be length later
-	sub edx, r8d				; take out previous bytes in run
-	mov cl, 4
-	cmp dl, cl
-	cmovb ecx, edx
-	jb expand_loop
+	mov ecx, 4				; cap bytes to duplicate to 4
+	cmp ecx, edx
+	cmovg ecx, edx
+	jg expand_loop
 
 	; append the rest of the count
-	sub dl, cl
+	sub dx, cx
 	mov byte [rsp + 4], dl
 	mov dl, 5				; dl is output length
 
@@ -100,8 +103,9 @@ rle_asm_end:
 	mov rsi, rsp				; buffer is at rsp
 	syscall
 
-	cmp rbx, r10				; loop if we have data left to process
-	jb rle_asm_outer_loop
+	;sub r10d, ebx				; take out count. loop if we have data left to process
+	cmp r10d, ebx
+	jg rle_asm_outer_loop
 
 	jmp read_loop
 
